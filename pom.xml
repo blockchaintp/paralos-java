@@ -91,6 +91,7 @@
     <module>build-tools</module>
     <module>keymanager</module>
     <module>sawtooth-utils</module>
+    <module>sawtooth-mttp</module>
   </modules>
 
   <build>
@@ -319,6 +320,14 @@
         <artifactId>protobuf-java</artifactId>
         <version>${protobuf.version}</version>
       </dependency>
+
+
+      <dependency>
+        <groupId>org.zeromq</groupId>
+        <artifactId>jeromq</artifactId>
+        <version>0.3.6</version>
+      </dependency>
+
     </dependencies>
   </dependencyManagement>
 </project>
