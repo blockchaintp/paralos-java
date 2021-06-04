@@ -90,7 +90,9 @@
   <modules>
     <module>build-tools</module>
     <module>keymanager</module>
+    <module>sawtooth-utils</module>
   </modules>
+
   <build>
     <pluginManagement>
       <plugins>
@@ -300,6 +302,18 @@
         <artifactId>sawtooth-sdk-signing</artifactId>
         <version>${sawtooth.sdk.version}</version>
       </dependency>
+      <dependency>
+        <groupId>org.hyperledger.sawtooth</groupId>
+        <artifactId>sawtooth-sdk-protos</artifactId>
+        <version>${sawtooth.sdk.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.hyperledger.sawtooth</groupId>
+        <artifactId>sawtooth-sdk-transaction-processor</artifactId>
+        <version>${sawtooth.sdk.version}</version>
+      </dependency>
+
+      <!-- Protobuf and related -->
       <dependency>
         <groupId>com.google.protobuf</groupId>
         <artifactId>protobuf-java</artifactId>
