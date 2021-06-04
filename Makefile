@@ -109,7 +109,7 @@ analyze: analyze_sonar
 .PHONY: analyze_sonar
 analyze_sonar: package
 	[ -z "$(SONAR_AUTH_TOKEN)" ] || \
-	$(DOCKER_MVN) sonar:sonar \
+	$(DOCKER_MVN) package sonar:sonar \
 			-Dsonar.projectKey=$(ORGANIZATION)_$(REPO):$(SAFE_BRANCH_NAME) \
 			-Dsonar.projectName="$(ORGANIZATION)/$(REPO) $(SAFE_BRANCH_NAME)" \
 			-Dsonar.projectVersion=$(VERSION) \
