@@ -31,6 +31,11 @@ SONAR_HOST_URL ?= https://sonarcloud.io
 SONAR_AUTH_TOKEN ?=
 
 ##
+# Kubernetes Settings
+##
+KUBE_CONFIG ?= $(PWD)/dummy-kubeconfig.yaml
+
+##
 # Maven related settings
 ##
 MAVEN_SETTINGS ?= $(shell if [ -r $(HOME)/.m2/settings.xml ]; then \
@@ -77,29 +82,42 @@ DOCKER_SOCK ?= /var/run/docker.sock
 TOOLCHAIN_IMAGE := blockchaintp/toolchain:latest
 TOOLCHAIN_HOME := /home/toolchain
 
+MAVEN_SETTINGS_VOL = $(shell if [ -n "$(MAVEN_SETTINGS)" ] && [ -r "$(MAVEN_SETTINGS)" ]; then echo -v \
+	$(MAVEN_SETTINGS):$(TOOLCHAIN_HOME)/.m2/settings.xml; fi)
+
+KUBE_CONFIG_VOL = $(shell if [ -n "$(KUBE_CONFIG)" ] && [ -r "$(KUBE_CONFIG)" ]; then echo -v \
+	$(KUBE_CONFIG):$(TOOLCHAIN_HOME)/.kube/config; fi)
+KUBE_CONFIG_ENV = $(shell if [ -n "$(KUBE_CONFIG)" ] && [ -r "$(KUBE_CONFIG)" ]; then echo -e \
+	KUBECONFIG=$(TOOLCHAIN_HOME)/.kube/config; fi)
+
 TOOL_VOLS = -v toolchain-home-$(ISOLATION_ID):/home/toolchain \
+	$(MAVEN_SETTINGS_VOL) $(KUBE_CONFIG_VOL) \
 	-v $(PWD):/project
 
-TOOL = $(DOCKER_RUN_USER) -e GITHUB_TOKEN -e MAVEN_HOME=/home/toolchain/.m2 $(TOOL_VOLS) \
-	-w $${WORKDIR:-/project}
-TOOL_DEFAULT = $(DOCKER_RUN_DEFAULT) -e GITHUB_TOKEN \
-	-e MAVEN_HOME=/home/toolchain/.m2 $(TOOL_VOLS) -w $${WORKDIR:-/project}
+TOOL_ENVIRONMENT = -e GITHUB_TOKEN -e MAVEN_HOME=/home/toolchain/.m2 \
+	-e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e FOSSA_API_KEY \
+	$(KUBE_CONFIG_ENV)
 
-TOOLCHAIN := $(TOOL) \
-	$(shell if [ -n "$(MAVEN_SETTINGS)" ]; then echo -v \
-	$(MAVEN_SETTINGS):$(TOOLCHAIN_HOME)/.m2/settings.xml; fi) $(TOOLCHAIN_IMAGE)
+TOOL_NOWORKDIR = $(DOCKER_RUN_USER) $(TOOL_ENVIRONMENT) $(TOOL_VOLS)
+TOOL_DEFAULT_NOWORKDIR = $(DOCKER_RUN_DEFAULT) $(TOOL_ENVIRONMENT) $(TOOL_VOLS)
+TOOL = $(TOOL_NOWORKDIR) -w $${WORKDIR:-/project}
+TOOL_DEFAULT = $(TOOL_DEFAULT_NOWRKDIR) -w $${WORKDIR:-/project}
+
+TOOLCHAIN := $(TOOL) $(TOOLCHAIN_IMAGE)
 DOCKER_MVN := $(TOOLCHAIN) mvn -Drevision=$(MAVEN_REVISION) -B
-BUSYBOX := $(DOCKER_RUN_USER) $(TOOL_VOLS) \
-	$(shell if [ -n "$(MAVEN_SETTINGS)" ]; then echo -v \
-	$(MAVEN_SETTINGS):$(TOOLCHAIN_HOME)/.m2/settings.xml; fi) busybox:latest
-BUSYBOX_ROOT := $(DOCKER_RUN_ROOT) $(TOOL_VOLS) \
-	$(shell if [ -n "$(MAVEN_SETTINGS)" ]; then echo -v \
-	$(MAVEN_SETTINGS):$(TOOLCHAIN_HOME)/.m2/settings.xml; fi) busybox:latest
+BUSYBOX := $(DOCKER_RUN_USER) $(TOOL_VOLS) busybox:latest
+BUSYBOX_ROOT := $(DOCKER_RUN_ROOT) $(TOOL_VOLS) busybox:latest
 
 DIVE_ANALYZE = $(TOOL) -v $(DOCKER_SOCK):/var/run/docker.sock \
 	--user toolchain:$(shell getent group docker|awk -F: '{print $$3}') \
 	$(TOOLCHAIN_IMAGE) dive --ci
 
+##
+# FOSSA parameters
+###
+FOSSA_TIMEOUT ?= 1200
+
+CLEAN_DIRS = build markers target
 ##
 # BEGIN Standardized directives
 ##
@@ -120,7 +138,7 @@ clean: clean_dirs
 # Clean everything and the docker image, leaving the repo pristine
 .PHONY: distclean
 distclean: clean
-	rm -rf $(MARKERS)
+	rm -rf $(CLEAN_DIRS)
 
 # All compilation tasks
 .PHONY: build
@@ -170,15 +188,17 @@ project_%:
 .PHONY: analyze_fossa
 analyze_fossa:
 	if [ -z "$(CHANGE_BRANCH)" ]; then \
-	  $(TOOL_DEFAULT) -e FOSSA_API_KEY blockchaintp/fossa:latest fossa analyze --verbose \
+	  $(TOOLCHAIN) fossa analyze --verbose \
 	    --no-ansi -b ${BRANCH_NAME}; \
-	  $(TOOL_DEFAULT) -e FOSSA_API_KEY blockchaintp/fossa:latest fossa test --verbose \
-	    --no-ansi -b ${BRANCH_NAME}; \
+	  $(TOOLCHAIN) fossa test --verbose \
+	    --no-ansi -b ${BRANCH_NAME} \
+	    --timeout $(FOSSA_TIMEOUT) ; \
 	else \
-	  $(TOOL_DEFAULT) -e FOSSA_API_KEY blockchaintp/fossa:latest fossa analyze --verbose \
+	  $(TOOLCHAIN) fossa analyze --verbose \
 	    --no-ansi -b ${CHANGE_BRANCH}; \
-	  $(TOOL_DEFAULT) -e FOSSA_API_KEY blockchaintp/fossa:latest fossa test --verbose \
-	    --no-ansi -b ${CHANGE_BRANCH}; \
+	  $(TOOLCHAIN) fossa test --verbose \
+	    --no-ansi -b ${CHANGE_BRANCH} \
+	    --timeout $(FOSSA_TIMEOUT) ; \
 	fi
 
 .PHONY: analyze_go
@@ -190,16 +210,18 @@ analyze_go: $(MARKERS)/build_toolchain_docker
 analyze_sonar_mvn: $(MARKERS)/build_toolchain_docker
 	[ -z "$(SONAR_AUTH_TOKEN)" ] || \
 	  if [ -z "$(CHANGE_BRANCH)" ]; then \
-	    $(DOCKER_MVN) package sonar:sonar \
+	    $(DOCKER_MVN) verify sonar:sonar \
 	        -Dsonar.organization=$(ORGANIZATION) \
 	        -Dsonar.projectKey=$(ORGANIZATION)_$(REPO) \
 	        -Dsonar.projectName="$(ORGANIZATION)/$(REPO)" \
 	        -Dsonar.branch.name=$(BRANCH_NAME) \
 	        -Dsonar.projectVersion=$(VERSION) \
 	        -Dsonar.host.url=$(SONAR_HOST_URL) \
+	        -Dsonar.junit.reportPaths=target/surefire-reports,**/target/surefire-reports \
+	        -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml,**/target/site/jacoco/jacoco.xml \
 	        -Dsonar.login=$(SONAR_AUTH_TOKEN) ; \
 	  else \
-	    $(DOCKER_MVN) package sonar:sonar \
+	    $(DOCKER_MVN) verify sonar:sonar \
 	        -Dsonar.organization=$(ORGANIZATION) \
 	        -Dsonar.projectKey=$(ORGANIZATION)_$(REPO) \
 	        -Dsonar.projectName="$(ORGANIZATION)/$(REPO)" \
@@ -208,6 +230,8 @@ analyze_sonar_mvn: $(MARKERS)/build_toolchain_docker
 	        -Dsonar.pullrequest.base=$(CHANGE_TARGET) \
 	        -Dsonar.projectVersion=$(VERSION) \
 	        -Dsonar.host.url=$(SONAR_HOST_URL) \
+	        -Dsonar.junit.reportPaths=target/surefire-reports,**/target/surefire-reports \
+	        -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml,**/target/site/jacoco/jacoco.xml \
 	        -Dsonar.login=$(SONAR_AUTH_TOKEN) ; \
 	  fi
 
@@ -225,7 +249,7 @@ analyze_sonar_generic:
 	        -Dsonar.projectVersion=$(VERSION) \
 	        -Dsonar.host.url=$(SONAR_HOST_URL) \
 	        -Dsonar.login=$(SONAR_AUTH_TOKEN) \
-	        -Dsonar.junit.reportPaths=**/target/surefire-reports; \
+	        -Dsonar.junit.reportPaths=target/surefire-reports,**/target/surefire-reports; \
 	  else \
 	    $(DOCKER_RUN_USER) \
 	      -v $$(pwd):/usr/src \
@@ -239,7 +263,7 @@ analyze_sonar_generic:
 	        -Dsonar.projectVersion=$(VERSION) \
 	        -Dsonar.host.url=$(SONAR_HOST_URL) \
 	        -Dsonar.login=$(SONAR_AUTH_TOKEN) \
-	        -Dsonar.junit.reportPaths=**/target/surefire-reports; \
+	        -Dsonar.junit.reportPaths=target/surefire-reports,**/target/surefire-reports; \
 	  fi
 
 .PHONY: analyze_sonar_js
@@ -295,7 +319,7 @@ build/$(REPO)-$(VERSION).tgz:
 $(MARKERS)/toolchain_vols:
 	docker volume create toolchain-home-$(ISOLATION_ID)
 	$(BUSYBOX_ROOT) chown -R $(UID):$(GID) $(TOOLCHAIN_HOME)
-	touch $@
+	@touch $@
 
 $(MARKERS)/build_toolchain_docker: $(MARKERS) $(MARKERS)/toolchain_vols
 	if ! docker image ls -qq $(TOOLCHAIN_IMAGE) > /dev/null; then \
@@ -304,12 +328,12 @@ $(MARKERS)/build_toolchain_docker: $(MARKERS) $(MARKERS)/toolchain_vols
 	else \
 	  echo "Toolchain $(TOOLCHAIN_IMAGE) already available"; \
 	fi
-	touch $@
+	@touch $@
 
 .PHONY: clean_toolchain_docker
 clean_toolchain_docker:
-	docker rmi -f $(TOOLCHAIN_IMAGE)
-	docker volume rm -f toolchain-home-$(ISOLATION_ID)
+	docker rmi -f $(TOOLCHAIN_IMAGE) || true
+	docker volume rm -f toolchain-home-$(ISOLATION_ID) || true
 	rm -f $(MARKERS)/toolchain_vols
 	rm -f $(MARKERS)/build_toolchain_docker
 
@@ -321,12 +345,11 @@ fix_permissions:
 # This will reset the build status possible causing steps to rerun
 .PHONY: clean_markers
 clean_markers:
-	rm -rf $(MARKERS)
-	rm -rf build
+	rm -rf $(CLEAN_DIRS)
 
 $(MARKERS)/build_go: $(MARKERS)/build_toolchain_docker
 	$(TOOLCHAIN) bash -c "if [ -r scripts/build ]; then scripts/build; else go build ./...; fi"
-	touch $@
+	@touch $@
 
 .PHONY: clean_build_go
 clean_build_go: $(MARKERS)/build_toolchain_docker
@@ -335,22 +358,27 @@ clean_build_go: $(MARKERS)/build_toolchain_docker
 
 $(MARKERS)/build_mvn: $(MARKERS)/build_toolchain_docker
 	$(DOCKER_MVN) compile
-	touch $@
+	@touch $@
 
 $(MARKERS)/package_mvn: $(MARKERS)/build_toolchain_docker
-	$(DOCKER_MVN) package verify
-	touch $@
+	$(DOCKER_MVN) package
+	@touch $@
 
 clean_mvn: $(MARKERS)/build_toolchain_docker
 	$(DOCKER_MVN) clean
 
+##
+# For this to work properly in pom.xml you need
+# <skipTests>true</skipTests> in the maven-surefire-plugin
+# configuration.
+##
 $(MARKERS)/test_mvn: $(MARKERS)/build_toolchain_docker
-	$(DOCKER_MVN) test
-	touch $@
+	$(DOCKER_MVN) -DskipTests=false test
+	@touch $@
 
 $(MARKERS)/test_go: $(MARKERS)/build_toolchain_docker
 	$(TOOLCHAIN) go test ./...
-	touch $@
+	@touch $@
 
 $(MARKERS)/publish_mvn: $(MARKERS)/build_toolchain_docker
 	echo $(DOCKER_MVN) clean deploy -DupdateReleaseInfo=$(MAVEN_UPDATE_RELEASE_INFO) \
@@ -370,8 +398,7 @@ $(MARKERS):
 
 .PHONY: clean_dirs_standard
 clean_dirs_standard:
-	rm -rf build
-	rm -rf $(MARKERS)
+	rm -rf $(CLEAN_DIRS)
 
 .PHONY: clean_dirs
 clean_dirs: clean_dirs_standard
@@ -379,7 +406,7 @@ clean_dirs: clean_dirs_standard
 $(MARKERS)/check_ignores:
 	git check-ignore build
 	git check-ignore $(MARKERS)
-	touch $@
+	@touch $@
 
 .PHONY: what_version
 what_version:
