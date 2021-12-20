@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## v0.0.4
+
+* build(deps): Bump log4j-core from 2.16.0 to 2.17.0 [view commit](https://github.com/blockchaintp/paralos-java/commit/21d0cc1c16c2b493bbd84ed2e8e8b1bb2b8548c1)
+* build(deps): Bump log4j-core from 2.14.1 to 2.16.0 [view commit](https://github.com/blockchaintp/paralos-java/commit/d6d82ded09fe6989d8f37a4e05b90be2fca56a37)
+* build(deps): Bump log4j-api from 2.13.0 to 2.16.0 [view commit](https://github.com/blockchaintp/paralos-java/commit/b3b17a440daf83cbc3df5099489c01da6c5e5439)
+
+## v0.0.3
+
+
+## v0.0.2
+
+
 ## v0.0.1
 
 * fix: correct location of semver [view commit](https://github.com/blockchaintp/paralos-java/commit/25b99e75a3c09f0548b942a706ff61d69f37c17b)
