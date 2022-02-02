@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## v0.0.5
+
+* build(deps): Bump log4j-core from 2.17.0 to 2.17.1 [view commit](https://github.com/blockchaintp/paralos-java/commit/a2ee58d052a58b72ce4b0a92fd6054d7bdb61107)
+* build(deps): Bump log4j-api from 2.16.0 to 2.17.1 [view commit](https://github.com/blockchaintp/paralos-java/commit/5cf9e42a3d7fc9ce387dd39fed9a7b06ea567cf6)
+
 ## v0.0.4
 
 * build(deps): Bump log4j-core from 2.16.0 to 2.17.0 [view commit](https://github.com/blockchaintp/paralos-java/commit/21d0cc1c16c2b493bbd84ed2e8e8b1bb2b8548c1)
